@@ -1,5 +1,6 @@
 ﻿namespace IdempotencySolution
 {
+    using Azure.Core;
     using SqlSugar;
     using System;
     using System.Threading.Tasks;
@@ -25,9 +26,13 @@
             {
                 // 每个线程都创建一个新的 db 客户端实例，确保独立连接
                 var threadDb = CreateDbClient(connectionString);
+                var taskName = "任务名称";
 
                 //模拟接口被多次重复调用，导致请求成功后发生了幂等性问题
-                InsertScheduleTaskWithTransaction(threadDb, "任务名称");
+                //InsertScheduleTaskWithTransaction(threadDb, taskName);
+
+                //带异步锁解决幂等性问题
+                InsertScheduleTaskWithTransactionLock(threadDb, taskName);
             });
 
             Console.WriteLine("最终数据库中的任务：");
@@ -95,6 +100,56 @@
                 db.Ado.RollbackTran();
                 Console.WriteLine($"插入失败任务名称: {taskName}, {ex.Message}");
             }
+        }
+
+
+        /// <summary>
+        /// 创建任务且有事务（带锁）
+        /// </summary>
+        /// <param name="db"></param>
+        /// <param name="taskName"></param>
+        static async void InsertScheduleTaskWithTransactionLock(SqlSugarClient db, string taskName)
+        {
+            var asyncLock = AsyncLockManager.GetLock(taskName);
+
+            using (await asyncLock.LockAsync())
+            {
+                // 使用事务保证线程内的操作原子性
+                db.Ado.BeginTran();
+
+                try
+                {
+                    // 查询是否存在任务号
+                    var existingTask = db.Queryable<ScheduleTask>()
+                        .Any(x => x.Name == taskName);
+
+                    //不存在
+                    if (!existingTask)
+                    {
+                        // 插入任务
+                        db.Insertable(new ScheduleTask()
+                        {
+                            Name = taskName,
+                            CreatedAt = DateTime.Now
+                        }).ExecuteCommand();
+                        Console.WriteLine($"插入成功任务名称: {taskName}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"任务名称： {taskName} 已经存在");
+                    }
+
+                    // 提交事务
+                    db.Ado.CommitTran();
+                }
+                catch (Exception ex)
+                {
+                    // 发生异常时回滚事务
+                    db.Ado.RollbackTran();
+                    Console.WriteLine($"插入失败任务名称: {taskName}, {ex.Message}");
+                }
+            }
+
         }
     }
 

@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Nito.AsyncEx" Version="5.1.2" />
     <PackageReference Include="SqlSugarCore" Version="5.1.4.170" />
   </ItemGroup>
 
