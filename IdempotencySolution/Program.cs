@@ -32,7 +32,10 @@
                 //InsertScheduleTaskWithTransaction(threadDb, taskName);
 
                 //带异步锁解决幂等性问题
-                InsertScheduleTaskWithTransactionLock(threadDb, taskName);
+                //InsertScheduleTaskWithTransactionLock(threadDb, taskName);
+
+                //其他异步锁解决幂等性问题
+                InsertScheduleTaskWithTransactionOtherLock(threadDb, taskName);
             });
 
             Console.WriteLine("最终数据库中的任务：");
@@ -150,6 +153,53 @@
                 }
             }
 
+        }
+
+        /// <summary>
+        /// 创建任务(利用线程字典)
+        /// </summary>
+        /// <param name="db"></param>
+        /// <param name="taskName"></param>
+        static void InsertScheduleTaskWithTransactionOtherLock(SqlSugarClient db, string taskName)
+        {
+            string destinationTask = string.Empty;
+            try
+            {             
+                //获取是否目标任务数，大于0则抛异常证明存在
+                if (DestinationTaskManager.TryGetDestinationTask(taskName, out destinationTask) > 0)
+                {
+                    throw new Exception($"{taskName}已存在，创建任务失败");
+                }
+
+                // 查询是否存在任务号
+                var existingTask = db.Queryable<ScheduleTask>()
+                    .Any(x => x.Name == taskName);
+
+                //不存在
+                if (!existingTask)
+                {
+                    // 插入任务
+                    db.Insertable(new ScheduleTask()
+                    {
+                        Name = taskName,
+                        CreatedAt = DateTime.Now
+                    }).ExecuteCommand();
+                    Console.WriteLine($"插入成功任务名称: {taskName}");
+                }
+                else
+                {
+                    Console.WriteLine($"任务名称： {taskName} 已经存在");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"插入失败任务名称: {taskName}, {ex.Message}");
+            }
+            finally
+            {
+                //移除
+                DestinationTaskManager.RemoveTask(destinationTask);
+            }
         }
     }
 
